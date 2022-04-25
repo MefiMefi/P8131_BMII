@@ -1,0 +1,282 @@
+---
+title: "P8131-hw4-rw2844"
+author: "Renjie Wei"
+date: '2022-03-02'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(nnet)
+library(MASS)
+```
+## Question 1
+Summarize the data using appropriate tables of percentages to show the pair-wise associations between the levels of satisfaction and 1) contact with other residents and 2) type of housing. Comment on patterns in the associations.
+
+### Answers
+```{r input_data, echo = FALSE}
+house.data <- data.frame(
+    sat.low = c(65, 130, 67, 34, 141, 130),
+    sat.medium = c(54, 76, 48, 47, 116, 105),
+    sat.high = c(100, 111, 62, 100, 191, 104),
+    house.type = rep(c("tower block", "apartment", "house"),2),
+    contact = c(rep("low",3),rep("high",3))
+)
+house.data$contact = factor(house.data$contact, levels = c("low", "high"))
+house.data$house.type = factor(house.data$house.type, levels = c("apartment", "tower block",  "house"))
+```
+```{r table_view, echo = FALSE}
+house.data %>% group_by(contact) %>% 
+    summarise(
+        low.count = sum(sat.low),
+        med.count = sum(sat.medium),
+        high.count = sum(sat.high)
+    ) %>% 
+    mutate(
+        total = low.count + med.count + high.count ,
+        sat.low.pct = round(low.count / total * 100, 3),
+        sat.med.pct = round(med.count / total * 100, 3),
+        sat.high.pct = round(high.count / total * 100, 3)
+    
+    ) %>% 
+    dplyr::select(contact, ends_with("pct")) %>% 
+    knitr::kable(col.names = c("Contact with others", "Low Satisfaction", "Medium Satisfaction", "High Satisfaction"), caption = "Contact and satisfaction (%)")
+```
+The table above shows the pair-wise associations between the levels of satisfaction and contact with other residents. From the table, we can see that the levels of satisfaction is relatively higher in high contact group than that in low contact group. Residents who lived with a high level contacts with other residents tends to have higher satisfaction. 
+
+```{r table_view_2, echo = FALSE}
+house.data %>% group_by(house.type) %>% 
+    summarise(
+        low.count = sum(sat.low),
+        med.count = sum(sat.medium),
+        high.count = sum(sat.high)
+    ) %>% 
+    mutate(
+        total = low.count + med.count + high.count ,
+        sat.low.pct = round(low.count / total * 100, 3),
+        sat.med.pct = round(med.count / total * 100, 3),
+        sat.high.pct = round(high.count / total * 100, 3)
+    ) %>% 
+    dplyr::select(house.type, ends_with("pct")) %>% 
+    knitr::kable(col.names = c("House Type", "Low Satisfaction", "Medium Satisfaction", "High Satisfaction"), caption = "Housing and satisfaction (%)")
+```
+The table above shows the pair-wise associations between the levels of satisfaction and types of housing. From the table, we can see that the levels of satisfaction is relatively higher in residents who lived in tower block. However, the difference in those who lived in apartment and house are not that obvious.
+
+## Question 2
+
+Use nominal logistic regression model for the associations between response variable, the levels of satisfaction, and the other two variables. Obtain a model that summarizes the patterns in the data. Describe your findings (the pattern in the associations, odds ratios with 95% confidence intervals, goodness-of-fit). (Hint: use dummy variable for house types.) Is there interaction of contact level by house type?
+
+### Answers
+
+**Model Fitting**
+
+The multinomial logistic models to be fitted are:
+$$\begin{cases}\log(\frac{\pi_{\text{satisfaction}=\text{medium}}}{\pi_{\text{satisfaction}=\text{low}}}) = \beta_{20}+\beta_{21}\times \text{House}+ \beta_{22}\times \text{Tower Block}+\beta_{23}\times\text{High Contact} \\
+\log(\frac{\pi_{\text{satisfaction}=\text{high}}}{\pi_{\text{satisfaction}=\text{low}}}) = \beta_{30}+\beta_{31}\times \text{House}+ \beta_{32}\times \text{Tower Block}+\beta_{33}\times\text{High Contact}  \end{cases}$$
+
+```{r multinom_model}
+set.seed(2022)
+house.multinom <- multinom(cbind(sat.low, sat.medium, sat.high)~ house.type + contact, data = house.data)
+multinom.sum <- summary(house.multinom)
+```
+
+
+```{r summary_tab_function, echo = FALSE}
+summary_model_tab <- function(summary.obj){
+    coef_tab <- data.frame(summary.obj$coefficients)
+    coef_tab <- data.frame(groups = rownames(coef_tab), coef_tab)
+    std_tab <- data.frame(summary.obj$standard.errors)
+    std_tab <- data.frame(groups = rownames(std_tab), std_tab)
+    
+    coef_tab = coef_tab %>% pivot_longer(
+        cols = c(tail(colnames(coef_tab),-1)),
+        names_to = "variable",
+        values_to = "coefficient"
+    ) 
+    coef_tab <- coef_tab %>% dplyr::select(c('groups', 'variable', 'coefficient'))
+    
+    std_tab = std_tab %>% pivot_longer(
+        cols = c(tail(colnames(std_tab),-1)),
+        names_to = "variable",
+        values_to = "sd"
+    ) 
+    std_tab <- std_tab %>% dplyr::select(c('groups', 'variable', 'sd'))
+    
+    sum_tab <- merge(coef_tab, std_tab, by = c("variable", "groups"))
+    sum_tab <- sum_tab %>% dplyr::select(c("groups", "variable",everything())) %>% 
+        mutate(
+            ci_lower  = coefficient - qnorm(0.975) * sd,
+            ci_upper  = coefficient + qnorm(0.975) * sd,
+            or = exp(coefficient),
+            or_lower = exp(ci_lower),
+            or_upper = exp(ci_upper)
+        )
+    sum_tab$coef_ci = paste("(",round(sum_tab$ci_lower, 3), round(sum_tab$ci_upper,3),")")
+    sum_tab$or_ci = paste("(",round(sum_tab$or_lower, 3), round(sum_tab$or_upper,3),")")
+    return(sum_tab %>% dplyr::select(c("groups", "variable", "coefficient", "sd", "coef_ci", "or", "or_ci", everything())))
+}
+
+```
+```{r query_func, echo = FALSE}
+sum_query <- function(cond_1, cond_2, df, key){
+    return(df[which(df[cond_1[1]]==cond_1[2] & df[cond_2[1]]==cond_2[2]),][[key]])
+}
+```
+
+**Findings**
+
+The following table shows the results of the multinomial models:
+```{r multinom_result, echo = FALSE}
+multinom_tab <- summary_model_tab(multinom.sum) %>% mutate(
+    groups = case_when(
+        groups == "sat.high" ~ "High",
+        groups == "sat.medium" ~ "Medium"
+    ),
+    variable = case_when(
+        variable == "contacthigh" ~ "High Contact",
+        variable == "house.typehouse" ~ "House",
+        variable == "house.typetower.block" ~ "Tower Block",
+        TRUE ~ "Intercept"
+    ),
+)
+multinom_tab %>% dplyr::select(c("groups", "variable", "coefficient", "coef_ci", "or", "or_ci")) %>% knitr::kable(col.names = c("Groups", "Variable", "$\\hat\\beta$", "95% CI of $\\hat\\beta$", "OR", "95% of OR"), caption = "Multinomial Model Results")
+```
+From this table, we can know that:
+
+\begin{itemize}
+  \item Given the level of contact: 
+  \begin{enumerate}
+  \item The odds of having medium satisfaction level comparing to low satisfaction in the residents who live in house is `r round(sum_query(c("groups","Medium"),c("variable","House"), multinom_tab, "or"),3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(sum_query(c("groups","Medium"),c("variable","House"), multinom_tab, "or_ci"))`, which is not significant at our significance level (0.05).
+  \item The odds of having high satisfaction level comparing to low satisfaction in the residents who live in house is `r round(sum_query(c("groups","High"),c("variable","House"), multinom_tab, "or"),3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(sum_query(c("groups","High"),c("variable","House"), multinom_tab, "or_ci"))`.
+  \item The odds of having medium satisfaction level comparing to low satisfaction in the residents who live in tower block is `r round(sum_query(c("groups","Medium"),c("variable","Tower Block"), multinom_tab, "or"),3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(sum_query(c("groups","Medium"),c("variable","Tower Block"), multinom_tab, "or_ci"))`.
+  \item The odds of having high satisfaction level comparing to low satisfaction in the residents who live in tower block is `r round(sum_query(c("groups","High"),c("variable","Tower Block"), multinom_tab, "or"),3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(sum_query(c("groups","High"),c("variable","Tower Block"), multinom_tab, "or_ci"))`.
+  \end{enumerate}
+  \item Given the type of housing:
+  \begin{enumerate}
+    \item The odds of having medium satisfaction level comparing to low satisfaction in the residents who have high contacts with other residents is `r round(sum_query(c("groups","Medium"),c("variable","High Contact"), multinom_tab, "or"),3)` times the odds of that in the residents who have low contacts. \\And the CI of odds ratio is `r sum_query(c("groups","Medium"),c("variable","High Contact"), multinom_tab, "or_ci")`.
+  \item The odds of having high satisfaction level comparing to low satisfaction in the residents who have high contacts with other residents is `r round(sum_query(c("groups","High"),c("variable","High Contact"), multinom_tab, "or"),3)` times the odds of that in the residents who have low contacts. \\And the CI of odds ratio is `r sum_query(c("groups","High"),c("variable","High Contact"), multinom_tab, "or_ci")`.
+  \end{enumerate}
+\end{itemize}
+
+**Goodness-of-Fit**
+
+```{r multinom_gof}
+# goodness of fit
+multinom.pihat = predict(house.multinom, type = "probs")
+multinom.m = rowSums(cbind(house.data$sat.low, house.data$sat.medium, house.data$sat.high))
+multinom.res.pearson = (cbind(house.data$sat.low, house.data$sat.medium, house.data$sat.high) - multinom.pihat * multinom.m) / sqrt(multinom.pihat * multinom.m)
+# Generalized Pearson Chisq Stat
+multinom.G.stat = sum(multinom.res.pearson^2)
+multinom.pval_pearson = 1 - pchisq(multinom.G.stat, 4)
+# deviance
+multinom.D.stat = sum(2 * cbind(house.data$sat.low, house.data$sat.medium, house.data$sat.high) * log(cbind(house.data$sat.low, house.data$sat.medium, house.data$sat.high) / (multinom.pihat * multinom.m)))
+multinom.pval_deviance = 1 - pchisq(multinom.D.stat, 4)
+```
+
+The goodness of fit tests shows that the pearson statistic is `r round(multinom.G.stat, 3)` with degree of freedom of 4, and the p-value is `r round(multinom.pval_pearson, 3)` greater than 0.05. The deviance is `r round(multinom.D.stat, 3)` with degree of freedom of 4, and the p-value is `r round(multinom.pval_deviance, 3)` greater than 0.05. Hence, the model fits the data well.
+
+**Interaction**
+
+The model with interaction terms is:
+$$\begin{cases}\log(\frac{\pi_{\text{satisfaction}=\text{medium}}}{\pi_{\text{satisfaction}=\text{low}}}) = \beta_{20}+\beta_{21}\times \text{House}+ \beta_{22}\times \text{Tower Block}+\beta_{23}\times\text{High Contact}  +\beta_{24}\times \text{House}\cdot\text{High Contact}+\beta_{25}\times \text{Tower Block}\cdot\text{High Contact}\\
+\log(\frac{\pi_{\text{satisfaction}=\text{high}}}{\pi_{\text{satisfaction}=\text{low}}}) = \beta_{30}+\beta_{31}\times \text{House}+ \beta_{32}\times \text{Tower Block}+\beta_{33}\times\text{High Contact}+\beta_{34}\times \text{House}\cdot\text{High Contact}+\beta_{35}\times \text{Tower Block}\cdot\text{High Contact}  \end{cases}$$
+
+The previous multinomial model is a nest model of this one. And we want to do the hypothesis testing with $\text{H}_0:\beta_{j4}=\beta_{j5}=0\\\text{H}_0:\beta_{j4}\neq0,\beta_{j5}\neq0 \ (j \in\{2,3\})$
+```{r interactions}
+house.interaction <- multinom(cbind(sat.low, sat.medium, sat.high)~ house.type* contact, data = house.data)
+interaction.sum <- summary(house.interaction)
+# Deviance Analysis
+multinom.dev = house.multinom$deviance
+interaction.dev = house.interaction$deviance
+nest.p2 = house.interaction$edf - house.multinom$edf
+nest.p_val = pchisq(multinom.dev - interaction.dev, nest.p2, lower.tail = FALSE)
+```
+The deviance analysis shows that the difference in deviance between model without and with interaction term is `r round(multinom.dev - interaction.dev, 3) `, and the p-value is `r round(nest.p_val, 3)` > 0.05. Thus, we fail to
+reject the null hypothesis and accept the smaller model, concluding that there is no interaction between type of housing and level of contact with other residents on the odds of medium or high level of satisfaction to low.
+
+## Question 3
+
+As the response has ordinal categories, fit proportional odds model to the data that include the same variables as used in the nominal logistic model obtained in (ii). What does the fitted model tell?
+```{r input_data_2, echo = FALSE}
+freq = c(house.data$sat.low, house.data$sat.medium, house.data$sat.high)
+res = c(rep(c("low","medium","high"),c(6,6,6)))
+res = factor(res, levels = c("low","medium","high"), ordered = T)
+house.ord <- data.frame(satisfaction = res, contact = rep(house.data$contact,3),house.type = rep(house.data$house.type,3),freq = freq)
+```
+### Answers
+
+**Model Fitting**
+
+The proportional logistic models to be fitted are:
+$$\begin{cases}\log(\frac{\pi_{\text{satisfaction}=\text{low}}}{\pi_{\text{satisfaction}=\text{medium}}+\pi_{\text{satisfaction}=\text{high}}}) = \beta_{20}+\beta_{1}\times \text{House}+ \beta_{2}\times \text{Tower Block}+\beta_{3}\times\text{High Contact}  \\
+\log(\frac{\pi_{\text{satisfaction}=\text{low}}+\pi_{\text{satisfaction}=\text{medium}}}{\pi_{\text{satisfaction}=\text{high}}}) = \beta_{30}+\beta_{1}\times \text{House}+ \beta_{2}\times \text{Tower Block}+\beta_{3}\times\text{High Contact}  \end{cases}$$
+```{r proportional_odds_model}
+house.polr=polr(satisfaction ~ contact + house.type ,data = house.ord, weights = freq)
+polr.sum <- summary(house.polr)
+```
+**Findings**
+
+The following table shows the results of the proportional models:
+```{r polr_result, echo = FALSE}
+polr_tab = data.frame(variable = row.names(polr.sum$coefficients), polr.sum$coefficients)
+polr_tab$ci_lower = polr_tab$Value - qnorm(0.975) * polr_tab$Std..Error
+polr_tab$ci_upper = polr_tab$Value + qnorm(0.975) * polr_tab$Std..Error
+polr_tab$or = exp(polr_tab$Value)
+polr_tab$or_lower = exp(polr_tab$ci_lower)
+polr_tab$or_upper = exp(polr_tab$ci_upper)
+polr_tab$coef_ci = paste("(",round(polr_tab$ci_lower, 3), round(polr_tab$ci_upper,3),")")
+polr_tab$or_ci = paste("(",round(polr_tab$or_lower, 3), round(polr_tab$or_upper,3),")")
+polr_tab = polr_tab %>% dplyr::select(c("variable", "Value", "coef_ci", "or", "or_ci", everything())) %>% 
+    mutate(
+        variable = case_when(
+            variable == "contacthigh" ~ "High Contact",
+            variable == "house.typetower block" ~ "Tower Block",
+            variable == "house.typehouse" ~ "House",
+            variable == "low|medium" ~ "Low vs. Medium and High",
+            TRUE ~ "Low and Medium vs. High"
+        )
+    )
+polr_tab %>% dplyr::select(c("variable", "Value", "coef_ci", "or", "or_ci"))%>% knitr::kable(col.names = c( "Variable", "$\\hat\\beta$", "95% CI of $\\hat\\beta$", "OR", "95% of OR"), row.names = F, caption = "Proportional Model Results")
+```
+From this table, we can know that:
+
+\begin{itemize}
+  \item Given the level of contact: 
+  \begin{enumerate}
+  \item The odds of having an higher satisfaction level in the residents who live in house is `r round(polr_tab[which(polr_tab$variable == "House"),][["or"]],3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(polr_tab[which(polr_tab$variable == "House"),][["or_ci"]])`.
+  \item The odds of having an higher satisfaction level in the residents who live in tower block is `r round(polr_tab[which(polr_tab$variable == "Tower Block"),][["or"]],3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(polr_tab[which(polr_tab$variable == "Tower Block"),][["or_ci"]])`.
+  \end{enumerate}
+  \item Given the type of housing:
+  \begin{enumerate}
+  \item The odds of having an higher satisfaction level in the residents who have high contact with other residents is `r round(polr_tab[which(polr_tab$variable == "High Contact"),][["or"]],3)` times the odds of that in the residents who live in apartment. \\And the CI of odds ratio is `r paste(polr_tab[which(polr_tab$variable == "High Contact"),][["or_ci"]])`.
+  
+  \end{enumerate}
+  \item The odds of having low satisfaction than having a medium or high satisfaction on average is `r round(polr_tab[which(polr_tab$variable == "Low vs. Medium and High"),][["or"]],3)`\\And the CI of odds ratio is `r paste(polr_tab[which(polr_tab$variable == "Low vs. Medium and High"),][["or_ci"]])`.
+  \item The odds of having low or medium satisfaction than having high satisfaction on average is `r round(polr_tab[which(polr_tab$variable == "Low and Medium vs. High"),][["or"]],3)`\\And the CI of odds ratio is `r paste(polr_tab[which(polr_tab$variable == "Low and Medium vs. High"),][["or_ci"]])`.
+\end{itemize}
+
+## Question 4
+
+Calculate Pearson residuals from the proportional odds model for ordinal response to find where the largest discrepancies are between the observed frequencies and expected frequencies estimated from the model.
+
+### Answers
+
+The following table shows the discrepancies are between the observed frequencies and expected frequencies estimated from the model.
+```{r polr_gof}
+# residuals
+plor.pihat = predict(house.polr, house.data, type='p')
+plor.m = rowSums(cbind(house.data$sat.low, house.data$sat.medium, house.data$sat.high))
+plor.res.pearson = (house.data[,1:3] - plor.pihat * plor.m)/sqrt(plor.pihat * plor.m)
+plor.res.tab <- data.frame(house.data, plor.res.pearson)
+#max(abs(plor.res.pearson))# low+apartment~high
+plor.G = sum(plor.res.pearson^2)
+numsamp = (3 - 1)*6 # degree of freedom for grouped data
+numparam = 2+3 # total num of param
+plor.pval = 1 - pchisq(plor.G ,df = numsamp - numparam)
+plor.res.tab %>% dplyr::select(-c("sat.low", "sat.medium", "sat.high")) %>% knitr::kable(col.names = c("House Type", "Contact", "Low satisfaction", "medium satisfaction", "High satisfaction"), digits = 3, caption = "Discrepancies")
+```
+From the table we can see that there is a largest discrepancy in residents live in house who highly contact with others and having a high satisfaction, the absolute value of discrepancy is `r round(max(abs(plor.res.pearson)),3)`.

@@ -1,0 +1,187 @@
+---
+title: "P8131_hw7_rw2844"
+author: "Renjie Wei"
+date: '2022-04-07'
+output: pdf_document
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(nlme)
+library(ggplot2)
+library(lattice)
+library(tidyverse)
+library(lme4)
+```
+
+```{r read_data}
+library(readr)
+pitch <- read_csv("HW7-politeness_data.csv")
+```
+
+## Problem a
+
+Exploratory analysis: provide boxplots to show the relation between gender/attitude and pitch (ignoring different scenarios).
+
+## Answer
+
+```{r boxplot}
+ggplot(pitch, aes(x = frequency, group = attitude, fill = attitude)) + geom_boxplot() + facet_grid("gender")
+```
+From the boxplot, we can see that:
+
+- Considering gender, the pitch of male is lower than the pitch of female
+- Considering attitude, the pitch of polite attitude is lower than the pitch of informal attitude.
+- The pitch difference between genders are more obvious than that between different attitudes.
+
+
+## Problem b
+
+Fit a mixed effects model with random intercepts for different subjects (gender and attitude being the fixed effects). What is the covariance matrix for a subject $Y_i$? What is the covariance matrix for the estimates of fixed effects (Hint: 3×3 matrix for intercept, gender and attitude)? What are the BLUPs for subject-specific intercepts? What are the residuals?
+
+## Answer
+
+The model is:
+$$Y_{ij} = \beta_0 + \beta_1\times\text{genderM}_{ij} + \beta_2\times\text{attitudePol}_{ij}+b_i + \epsilon_{ij}$$
+where $i = 1,\dots,6, \ j = 1,\dots,14$
+
+```{r problem_b_lmm}
+LMM1 = lme(frequency ~ gender + attitude, random = ~ 1 | subject, data = pitch, method = 'REML')
+
+vcovY1 = VarCorr(LMM1) # covariance estimates for random effects and variance for residuals
+SIGMA1 = LMM1$sigma # std for residuals
+vcovFE1 = vcov(LMM1) # covariance for fixed effects estimates (inv fisher info)
+#
+FE1 = fixed.effects(LMM1) # fixed effects coef
+RE1 = random.effects(LMM1) # ordered random effects, BLUPs
+RES1 = pitch$frequency-fitted(LMM1) # residuals
+```
+
+The covariance matrix of $Y_i$ is:
+$$\text{cov}(\mathbf{Y}_i) = 
+\begin{pmatrix} 
+\sigma_b^2+\sigma^2 & \sigma_b^2&\dots&\sigma_b^2\\
+\sigma_b^2&\sigma_b^2+\sigma^2&\dots&\sigma_b^2\\
+\dots&&&\dots\\
+\sigma_b^2&\sigma_b^2&\dots&\sigma_b^2+\sigma^2
+\end{pmatrix}
+= 
+\begin{pmatrix}  
+1445.9 & 598.2&\dots&598.2\\
+598.2&1445.9&\dots&598.2\\
+\dots&\ &\ &\dots\\
+598.2&598.2&\dots&1445.9
+\end{pmatrix}
+$$
+
+The covariance matrix for the estimates of fixed effects is:
+$$\text{cov}(\mathbf{\beta}) = 
+\begin{pmatrix} 
+\text{var}(\beta_0) & \text{cov}(\beta_0,\beta_1)& \text{cov}(\beta_0,\beta_2)\\
+\text{cov}(\beta_0,\beta_1) & \text{var}(\beta_1)& \text{cov}(\beta_1,\beta_2)\\
+\text{cov}(\beta_0,\beta_2) & \text{cov}(\beta_1,\beta_2)& \text{var}(\beta_2)
+\end{pmatrix}
+= 
+\begin{pmatrix}
+229.7 & -219.6&-20.2\\
+-219.6&439.16&6.5\times10^{-15}\\
+-20.2&6.5\times10^{-15}&40.4
+\end{pmatrix}$$
+
+The BLUPs for subject-specific intercepts are:
+```{r problem_b_blup}
+RE1 %>% knitr::kable(caption = "BLUPs for subject-specific intercepts", digits = 3, col.names = "BLUP")
+```
+
+
+
+The residuals are:
+```{r problem_b_residual}
+RES1
+```
+
+## Problem c
+
+Fit a mixed effects model with intercepts for different subjects (gender, attitude and their interaction being the fixed effects). Use likelihood ratio test to compare this model with the model in part (b) to determine whether the interaction term is significantly associated with pitch.
+
+## Answer
+
+The fitted model is:
+$$Y_{ij} = \beta_0 + \beta_1\times\text{genderM}_{ij} + \beta_2\times\text{attitudePol}_{ij}+\beta_3\times \text{genderM}_{ij}\times\text{attitudePol}_{ij}+b_i + \epsilon_{ij}$$
+The hypotheses are $\text{H}_0$: $\beta_3=0$ vs. $\text{H}_1$: $\beta_3\neq0$
+```{r problem_c_fit}
+LMM2 = lme(frequency ~ gender + attitude + gender * attitude, random = ~ 1 | subject, data = pitch, method = "ML")
+LMM1.ML = lme(frequency ~ gender + attitude, random = ~ 1 | subject, data = pitch, method = "ML")
+anova(LMM1.ML, LMM2) 
+```
+
+The likelihood ratio test shows that the Likelihood Ratio = 1.386 and the p-value = 0.2392 > 0.05, we fail to reject the null hypothesis and conclude that, at 0.05 significance level, the interaction term is not significantly associated with pitch.
+
+
+## Problem d
+
+Write out the mixed effects model with random intercepts for both subjects and scenarios (gender and attitude being the fixed effects). Fit the model using `lmer` in the `lme4` package. Write out the covariance matrix for a subject $Y_i$. What is the interpretation of the coefficient for the fixed effect term attitude?
+
+## Answer
+
+The fitted model is $$Y_{ijk} = \beta_0 + \beta_1\times\text{genderM}_{ij} + \beta_2\times\text{attitudePol}_{ij}+\beta_3\times \text{genderM}_{ij}\times\text{attitudePol}_{ij}+b_{1i} + b_{2k} +\epsilon_{ijk}$$
+
+where $i = 1,\dots,6$, $j= 1,\dots,2$, and $k = 1,\dots,7$.
+
+```{r problem_d_fit}
+LMM3 = lmer(frequency ~ gender + attitude + (1 | subject) + (1 | scenario), data = pitch)
+FE3 = fixed.effects(LMM3)
+RE3 = random.effects(LMM3)
+vcovY3 = VarCorr(LMM3) 
+vcovFE3 = vcov(LMM3)
+```
+
+In this model, the variance of each response is given by:
+\begin{equation} \label{eq1}
+\begin{split}
+\text{var}(Y_{ijk}) & = \text{var}(b_{1i} + b_{2k} +\epsilon_{ijk}) \\
+& = \sigma_{b_1}^2+\sigma_{b_2}^2+\sigma^2\\
+& = 14.983^2+24.763^2+25.254^2\\
+& = 1475.461
+\end{split}
+\end{equation}
+
+The marginal covariance between any pair of response are:
+$$
+\text{cov}(Y_{ij_1k_1}, Y_{ij_2k_2})  = \text{cov}(b_{1i} + b_{2k_1} +\epsilon_{ij_1k_1},b_{1i} + b_{2k_2} +\epsilon_{ij_2k_2})\\
+ = \text{var}(b_{1i}) +\text{cov}(b_{1i},b_{2k_1}) +\text{cov}(b_{1i},b_{2k_2}) +\text{cov}(b_{2k_1},b_{2k_2}) \\
+= \text{var}(b_{1i})
+$$
+$$
+\text{cov}(Y_{ij_1k}, Y_{ij_2k}) =\text{cov}(b_{1i} + b_{2k} +\epsilon_{ij_1k},b_{1i} + b_{2k} +\epsilon_{ij_2k})  \\
+= \text{var}(b_{1i}) +\text{cov}(b_{1i},b_{2k}) +\text{cov}(b_{1i},b_{2k}) +\text{var}(b_{2k}) \\
+= \text{var}(b_{1i})+\text{var}(b_{2k}) 
+$$
+$$
+\text{cov}(Y_{ijk_1}, Y_{ijk_2}) =\text{cov}(b_{1i} + b_{2k_1} +\epsilon_{ij_1k},b_{1i} + b_{2k_2} +\epsilon_{ij_2k})  \\
+= \text{var}(b_{1i}) +\text{cov}(b_{1i},b_{2k_1}) +\text{cov}(b_{1i},b_{2k_2}) +\text{cov}(b_{2k_1},b_{2k_2}) \\ 
+= \text{var}(b_{1i})
+$$
+Where$\text{var}(b_{1i})= 24.763^2= 613.2062$, $\text{var}(b_{1i})+\text{var}(b_{2k})= 24.763^2 + 14.983^2= 837.6965$.
+
+Hence, the covariance matrix for a subject $Y_i$ is:
+
+$$\text{cov}(\mathbf{Y}_i) = 
+\begin{pmatrix}  
+1475.46& \dots&613.21&837.70&\dots&613.21\\
+\cdots&\ddots&\cdots&\cdots&\ddots&\cdots\\
+613.21 &\dots&1475.46&613.21&\dots&837.70\\
+837.70& \dots&613.21&1475.46&\dots&613.21\\
+\cdots&\ddots&\cdots&\cdots&\ddots&\cdots\\
+613.21 &\dots&837.70&613.21&\dots&1475.46\\
+\end{pmatrix}
+$$
+
+```{r problem_d_fe}
+FE3 %>% knitr::kable(caption = "Fixed effect for double random intercept model", digits = 3, col.names = c("estimate"))
+```
+From the table above, we know that pitch is expected to be 20.002 Hz lower for polite attitude comparing with informal attitude on average holding everything else fixed.
+

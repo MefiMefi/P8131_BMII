@@ -1,0 +1,185 @@
+---
+title: "P8131-hw5-rw2844"
+author: "Renjie Wei"
+date: '2022-03-22'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, echo = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(nnet)
+library(MASS)
+library(pscl)
+```
+## Question 1
+
+(a) Fit a Poisson model (M1) with log link with W as the single predictor. Check the goodness of fit and interpret your model.
+
+Model 1 (M1):
+
+$$\log\left(Sa_i\right) = \log(1) + \beta_0+\beta_1\times \text{W}_i$$
+```{r}
+crab.dat <- read.table("HW5-crab.txt", header = TRUE)[,2:6]
+
+crab.glm1 <- glm(Sa~W, family=poisson, data=crab.dat)
+crab.sum1 <- summary(crab.glm1)
+
+res.p1=residuals(crab.glm1,type='pearson',data=crab.dat) 
+G1=sum(res.p1^2) 
+pval1=1-pchisq(G1,df=crab.glm1$df.residual) # lack of fit
+crab.coef1 <- coef(crab.glm1)
+crab.ci1 <- confint(crab.glm1)
+```
+
+Given the value of the residual deviance statistic of `r crab.glm1$deviance` with $df$ = `r crab.glm1$df.residual`, the p-value is `r pval1`, so the model does not fit well.
+However, since the Model 1 shows that $\beta_1$ = `r round(crab.coef1[[2]],3)`, which means the wider the female crab, the greater expected number of male satellites. More specifically, for one unit of increase in the width (W), the number of Satellites (Sa) will increase by `r round(exp(crab.coef1[[2]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(crab.ci1[2,1]),3)` ,`r round(exp(crab.ci1[2,2]),3)`) .
+
+(b) Fit a model (M2) with W and Wt as predictors. Compare it with the model
+in (a). Interpret your results.
+
+Model 2 (M2):
+
+$$\log\left(Sa_i\right) = \log(1) + \beta_0+\beta_1\times \text{W}_i+\beta_2\times\text{Wt}_i$$
+
+```{r}
+crab.glm2 <- glm(Sa~W + Wt, family=poisson, data=crab.dat)
+crab.sum2 <-summary(crab.glm2)
+
+res.p2=residuals(crab.glm2,type='pearson',data=crab.dat) 
+G2=sum(res.p2^2) 
+pval2=1-pchisq(G2,df=crab.glm2$df.residual) # lack of fit
+
+crab.coef2 <- coef(crab.glm2)
+crab.ci2 <- confint(crab.glm2)
+
+crab.test.stat=crab.glm1$deviance-crab.glm2$deviance
+pvaldiff=1-pchisq(crab.test.stat,df=1) # chisq test
+#pvaldiff # reject M1
+#anova(crab.glm1, crab.glm2, test="LRT")
+```
+The M1 and M2 are nested models, comparing the two model is equivalent to testing $H_0\text{ : }\beta_2=0\text{ vs. }H_1\text{ : }\beta_2\neq0$. The test statistic is `r crab.test.stat` with $df =1$, the p-value is `r round(pvaldiff,4)`<0.05. Null hypothesis is rejected, which means M2 better fits the data. However, given the value of the residual deviance statistic of `r crab.glm2$deviance` with $df$ = `r crab.glm2$df.residual`, the p-value is `r pval2`, so the model does not fit well.
+
+The Model 2 shows that $\beta_1$ = `r round(crab.coef2[[2]],3)` and $\beta_2$ = `r round(crab.coef2[[3]],3)`, which means the wider and heavier the female crab, the greater expected number of male satellites. More specifically, holding other conditions fixed, for one unit of increase in the width (W), the number of Satellites (Sa) will increase by `r round(exp(crab.coef2[[2]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(crab.ci2[2,1]),3)` ,`r round(exp(crab.ci2[2,2]),3)`); Holding other conditions fixed, for one unit of increase in the weight (Wt), the number of Satellites (Sa) will increase by `r round(exp(crab.coef2[[3]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(crab.ci2[3,1]),3)` ,`r round(exp(crab.ci2[3,2]),3)`) .
+
+
+(c) Check over dispersion in M2. Interpret the model after adjusting for over
+dispersion.
+
+```{r}
+G2 = sum(res.p2^2) 
+pval2 = 1-pchisq(G2,df = crab.glm2$df.residual) # lack of fit
+phi = G2/(crab.glm2$df.residual)
+phi_tilda = crab.glm2$deviance/crab.glm2$df.residual
+
+
+```
+Deviance and Pearson $\chi^2$ statistics of M2 are large and from (b) we know M2 is lack of fit.
+
+```{r}
+plot(qnorm((173+1:173+0.5)/(2*173+1.125)),sort(abs(res.p2)),xlab='Expected Half-Normal Order Stats',ylab='Ordered Abs Pearson Residuals')
+abline(a=0,b=1)
+abline(a=0,b=sqrt(phi),lty=2)
+```
+The half-normal plot using residual from this model shows evidence of over-dispersion.
+
+The dispersion parameter $\phi$ is `r round(phi,3)` and $\tilde \phi$ is `r round(phi_tilda,3)`, both are greater than 1.
+
+```{r}
+crab.glm3<- glm(Sa~W + Wt, family=quasipoisson(link = "log"), data=crab.dat)
+summary(crab.glm2,dispersion = phi)
+pval2.disp <- 1-pchisq(crab.glm2$deviance/phi,df = crab.glm2$df.residual)
+```
+The model fitted with constant over-dispersion parameter $\phi$, the deviance analysis shows a p-value `r round(pval2.disp,3)`, which means this model fit the data well.
+
+
+
+## Question 2
+
+(a) Fit a Poisson model with log link to the data with area, year, and length as
+predictors. Interpret each model parameter.
+
+Model:
+$$\log(\text{Intensity}_i) = \log(1)+\beta_0+\beta_1\times\text{Area2}+\beta_2\times\text{Area3}+\beta_3\times\text{Area4}+\beta_4\times\text{Year2000}+\beta_5\times\text{Year2001}+\beta_6\times\text{Length}$$
+
+```{r}
+para.dat <- read.table("HW5-parasite.txt", header = T)[, 2:11]
+para.dat$Year <- as.factor(para.dat$Year)
+para.dat$Area <- as.factor(para.dat$Area)
+```
+```{r}
+para.glm1 <- glm(Intensity ~ Area + Year + Length, family = poisson, data = para.dat)
+para.sum1 <- summary(para.glm1)
+para.coef1 <- coef(para.glm1)
+para.ci1 <- confint(para.glm1)
+```
+The Model shows that:
+
+For parameters about **Area**:
+
+$\beta_1$ = `r round(para.coef1[[2]],3)`. Holding other conditions fixed, Area change from 1 to 2, the Intensity decreased by `r round(exp(para.coef1[[2]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci1[2,1]),3)` ,`r round(exp(para.ci1[2,2]),3)`).
+
+$\beta_2$ = `r round(para.coef1[[3]],3)`. Holding other conditions fixed, Area change from 1 to 3, the Intensity decreased by `r round(exp(para.coef1[[3]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci1[3,1]),3)` ,`r round(exp(para.ci1[3,2]),3)`).
+
+$\beta_3$ = `r round(para.coef1[[4]],3)`. Holding other conditions fixed, Area change from 1 to 3, the Intensity increased by `r round(exp(para.coef1[[4]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci1[4,1]),3)` ,`r round(exp(para.ci1[4,2]),3)`).
+
+For parameters about **Year**:
+
+$\beta_4$ = `r round(para.coef1[[5]],3)`. Holding other conditions fixed, Year change from 1999 to 2000, the Intensity increased by `r round(exp(para.coef1[[5]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci1[5,1]),3)` ,`r round(exp(para.ci1[5,2]),3)`).
+
+$\beta_5$ = `r round(para.coef1[[6]],3)`. Holding other conditions fixed, Year change from 1999 to 2001, the Intensity decreased by `r round(exp(para.coef1[[6]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci1[6,1]),3)` ,`r round(exp(para.ci1[6,2]),3)`).
+
+For the parameter about **Length**:
+
+$\beta_6$ = `r round(para.coef1[[7]],3)`. Holding other conditions fixed, Year change from 1999 to 2001, the Intensity decreased by `r round(exp(para.coef1[[7]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci1[7,1]),3)` ,`r round(exp(para.ci1[7,2]),3)`).
+
+(b) Test for goodness of fit of the model in (a) and state conclusions.
+
+```{r}
+para.res.p1=residuals(para.glm1,type='pearson',data=para.dat) 
+para.G1=sum(para.res.p1^2) 
+para.pval1=1-pchisq(para.G1,df=para.glm1$df.residual) 
+```
+
+Given the value of the residual deviance statistic of `r para.glm1$deviance` with $df$ = `r para.glm1$df.residual`, the p-value is `r para.pval1`, so the model does not fit well.
+
+
+(c) Researchers suspect that there may be two strains of fish, one that is susceptible to parasites and one that is not. Without knowing which fish are susceptible, this could be regarded as a zero-inflated model. Building on the model in (a) (using the same predictors), fit an appropriate model to the data that can account for extra zeros. Provide an interpretation for each model parameter in terms of the problem.
+
+In this problem, I assume that `Area` is the factor that determine the strain of fish$Z_i$, where $Z_i=0$ with $P(Z_i=0)=\pi_i$means the strain of fish is not susceptible to parasite. And the distribution of Intensity conditioned on strain of fish is $Y_i|(Z_i=0)=0,\ Y_i|(Z_i=1)=Pois(\lambda_i)$ So the models are:
+$$
+\log(\frac{\pi_i}{1-\pi_i}) = \beta_{01}+\beta_{11}
+\times\text{Area2}+\beta_{21}\times\text{Area3}+\beta_{31}\times\text{Area4}
+$$
+and
+$$
+\log(\text{Intensity}_i) =\beta_{02}+\beta_{12}\times\text{Year2000}+\beta_{22}\times\text{Year2001}+\beta_{32}\times\text{Length}
+$$
+
+```{r}
+library(pscl)
+para.zif <- zeroinfl(Intensity ~ Year + Length | Area, data = para.dat) # child and camper for poisson, persons for binary (event is true zero, aka not fishing)
+summary(para.zif)
+para.coef2 <- coef(para.zif)
+para.ci2 <- confint(para.zif)
+```
+
+For the logistic model of the binary latent variable Strains $Z_i$:
+
+$\beta_{12}$ = `r round(para.coef2[[6]],3)`. Holding other conditions fixed, Area change from 1 to 2, the odds of the fish belongs to the parasite insusceptible strain increased by `r round(exp(para.coef2[[6]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci2[6,1]),3)` ,`r round(exp(para.ci2[6,2]),3)`).
+
+$\beta_{22}$ = `r round(para.coef2[[7]],3)`. Holding other conditions fixed, Area change from 1 to 3, the odds of the fish belongs to the parasite insusceptible strain increased by `r round(exp(para.coef2[[7]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci2[7,1]),3)` ,`r round(exp(para.ci2[7,2]),3)`).
+
+$\beta_{32}$ = `r round(para.coef2[[8]],3)`. Holding other conditions fixed, Area change from 1 to 4, the odds of the fish belongs to the parasite insusceptible strain decreased by `r round(exp(para.coef2[[8]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci2[8,1]),3)` ,`r round(exp(para.ci2[8,2]),3)`).
+
+For the poisson model of the poisson response Intensity $Y_i|(Z_i=1)=Pois(\lambda_i)$:
+
+
+$\beta_{11}$ = `r round(para.coef2[[2]],3)`. Holding other conditions fixed, Year change from 1999 to 2000, the Intensity increased by `r round(exp(para.coef2[[2]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci2[2,1]),3)` ,`r round(exp(para.ci2[2,2]),3)`).
+
+$\beta_{21}$ = `r round(para.coef2[[3]],3)`. Holding other conditions fixed, Year change from 1999 to 2001, the Intensity increased by `r round(exp(para.coef2[[3]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci2[3,1]),3)` ,`r round(exp(para.ci2[3,2]),3)`).
+
+$\beta_{31}$ = `r round(para.coef2[[4]],3)`. Holding other conditions fixed, for each unit increase in Length, the Intensity decreased by `r round(exp(para.coef1[[4]]),3)`, and the 95% confidence interval (CI) is (`r round(exp(para.ci2[4,1]),3)` ,`r round(exp(para.ci2[4,2]),3)`).

@@ -1,0 +1,169 @@
+---
+title: "P8131-hw3-rw2844"
+author: "Renjie Wei"
+date: "2/23/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r library, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+```
+
+## Problem 1
+
+(a) Fit a prospective model to the data to study the relation between alcohol consumption, age, and disease (model age as a continuous variable taking values 25, 35, 45, 55, 65, and 75). Interpret the result.
+
+```{r data1, echo=FALSE}
+# using A to represent alcohol consumption less than 79 and B for those greate or equals to 80 per day
+
+data1 = tibble(
+  case = c(0, 5, 21, 34, 36, 8, 1, 4, 25, 42, 19, 5),
+  control = c(106, 164, 138, 139, 88, 31, 9, 26, 29, 27, 18, 0),
+  age = (rep(c(25,35,45,55,65,75),2)),
+  alcohol = as.factor(append(rep("A",6),rep("B",6)))
+)
+```
+
+
+```{r problem_1_a}
+# Fit prospective model
+pro_fit.logit = glm(cbind(case, control) ~ age+ alcohol, family = binomial(link = 'logit'), data = data1)
+summary(pro_fit.logit)
+```
+I use DAC to represent the daily alcohol consumption.
+
+The prospective model gives us $\beta_0$ = `r round(pro_fit.logit$coefficients[[1]],3)`, $\beta_{age}$ = `r round(pro_fit.logit$coefficients[[2]],3)` and $\beta_{DAC\ge80}$ = `r round(pro_fit.logit$coefficients[[3]],3)` . The probability of esophageal cancer given age and daily alcohol consumption status is:
+$$P(D = 1|age, DAC) = \frac{e^{-5.023 + 0.062\times \text{age}+1.78\times I(\text{DAC}\ge80)}}{1+ e^{-5.023 + 0.062\times \text{age}+1.78\times I(\text{DAC}\ge80)}}$$
+The odds ratio of disease corresponding to unit change in different covariates is:
+
+```{r problem_1_a_or, echo = FALSE}
+summary_tab_1 <-
+  summary(pro_fit.logit)$coefficients %>% as.tibble() %>% 
+  janitor::clean_names()
+summary_tab_1["coefficients"] = c("Intercept","Age","DAC80")
+summary_tab_1["ci_beta_lower"] = summary_tab_1$estimate-qnorm(0.975)*summary_tab_1$std_error
+summary_tab_1["ci_beta_upper"] = summary_tab_1$estimate+qnorm(0.975)*summary_tab_1$std_error
+summary_tab_1["OR"] = exp(summary_tab_1$estimate)
+summary_tab_1["OR_L"] = exp(summary_tab_1$ci_beta_lower)
+summary_tab_1["OR_U"] = exp(summary_tab_1$ci_beta_upper)
+
+OR_age = exp(coef(summary(pro_fit.logit))[2])
+OR_B = exp(coef(summary(pro_fit.logit))[3])
+
+summary_tab_1 %>% select(coefficients,OR,OR_L,OR_U) %>% knitr::kable(col.names = c("Coefficients", "OR", expression("95% CI of OR lower limits"),expression("95% CI of OR upper limits")),digits = 3)
+```
+
+The model means that hold daily alcohol consumption at the same level, for a year increase in age, we expect to see a `r paste(round((OR_age-1)*100,2),"%")` increase (or 1.064 times the odds) in the odds of esophageal cancer. On the other hand, if we fixed age, then the odds of esophageal cancer increased by `r paste(round((OR_B-1)*100,2),"%")` (or 5.93 times the odds) in daily alcohol consumption greater or equal 80 compared with those who consume alcohol less than 80 per day. Since neither of the 95% CI contains 1, we have 95% confidence to conclude that the age and daily alcohol consumption is significantly associated with the risk of esophageal cancer.
+
+(b) Comparing odds ratio between age groups
+
+Two Model: $M_0: \psi_j=1$ for all j, and $M_1: \psi_j = \psi \ (\text{where}\ \psi\ \text{is an unknown constant})$:
+
+```{r model_odds}
+# convert age to age groups
+data1["age_group"] = as.factor(data1$age)
+
+# Build alcohol only model means all age groups 
+M0 = glm(cbind(case, control) ~ age_group, family = binomial(link = 'logit'),
+          data = data1)
+# Build Model 1
+M1 = glm(cbind(case, control) ~ age_group + alcohol, family = binomial(link = 'logit'),
+          data = data1)
+summary(M0)
+summary(M1)
+```
+
+The model we are going to comparing with can be represented by the following model:
+$$\log(\frac{P(D = 1|age, DAC)}{1-P(D = 1|age, DAC)}) = \beta_0 +\beta_1\cdot I(DAC\ge80)+\beta_i\cdot I(\text{age} \in\text{age group}_i),(i\in\{1,2,\dots,5\})$$
+Since there are total 6 age groups, we put only 5 dummy variables into the model above.
+$M_0$ only contains the `age_group`, which means there is no difference in the odds ratio relating to alcohol consumption in each group, that is $\beta_1=0$. $M_1$ contains dummy variables for age groups, which means $\beta_1$ in the above model is not 0. Therefore $M_0$ is the nest model of $M_1$.
+
+```{r dev_analysis,echo = TRUE}
+# Deviance Analysis
+dev0 = M0$deviance
+dev1 = M1$deviance
+p2 = M0$df.residual - M1$df.residual
+p_val = pchisq(dev0-dev1, p2, lower.tail = FALSE)
+```
+
+The null hypothesis is:
+$$\text{H}_0:\beta_1=0$$
+And the alternative hypothesis is:
+$$\text{H}_1:\beta_1\neq0$$
+The deviance of $M_0$ is `r round(dev0,3)`, the deviance of $M_1$ is `r round(dev1,3)`, and the deviance statistics = $deviance(M_0)-deviance(M_1)$ = `r round(dev0-dev1,3)`. And $df(M_0)-df(M_1) =  1$. Therefore we get a p-value of `r round(p_val,5)` < 0.05 and we reject the null hypothesis at 0.05 significance level. $M_1$ better fits the data, which means there is a significant association between alcohol consumption and disease.
+
+## Problem 2
+
+(a) Fit a logistic regression model to study the relation between germination rates and different types of seed and root extract. Interpret the result
+
+I use OA75 as O.ageyptiaca 75 in my dataset. And we need a grouped data grouped by species and root extract.
+```{r data2, echo = FALSE} 
+germ = c(10,23,23,26,17, 5,53,55,32,46,10, 8,10,8,23,0, 3,22,15,32,3 )
+num_seed = c(39,62,81,51,39, 6,74,72,51,79,13, 16,30,28,45,4, 12,41,30,51,7)
+type= c(rep("OA75", 11),rep("OA73",10))
+root = c(rep("bean", 5),rep("cucumber", 6),rep("bean", 5),rep("cucumber", 5))
+```
+```{r problem_2_a}
+none.disp <- glm(
+  cbind(germ,num_seed-germ) ~ type + root, family = binomial("logit")
+)
+summary(none.disp)
+
+```
+The prospective model gives us $\beta_0$ = `r round(none.disp$coefficients[[1]],3)`, $\beta_{OA75}$ = `r round(none.disp$coefficients[[2]],3)` and $\beta_{cucumber}$ = `r round(none.disp$coefficients[[3]],3)` . So the probability of germination given species and type of root extract of a seed is:
+$$P(germination = 1|\text{species = OA75}, \text{root extract = cucumber}) = \frac{e^{-4.30 + -0.27\times I(\text{species} = \text{OA75})+1.06\times I(\text{root extract}=\text{cucumber})}}{1+ e^{-4.30 + -0.27\times I(\text{species} = \text{OA75})+1.06\times I(\text{root extract}=\text{cucumber})}}$$
+The odds ratio of disease corresponding to unit change in different covariates is:
+
+```{r problem_2_a_or,echo = FALSE}
+summary_tab_2 <-
+  summary(none.disp)$coefficients %>% as.tibble() %>% 
+  janitor::clean_names()
+summary_tab_2["coefficients"] = c("Intercept","type=OA75","root extract=cucumber")
+summary_tab_2["ci_beta_lower"] = summary_tab_2$estimate-qnorm(0.975)*summary_tab_2$std_error
+summary_tab_2["ci_beta_upper"] = summary_tab_2$estimate+qnorm(0.975)*summary_tab_2$std_error
+summary_tab_2["OR"] = exp(summary_tab_2$estimate)
+summary_tab_2["OR_L"] = exp(summary_tab_2$ci_beta_lower)
+summary_tab_2["OR_U"] = exp(summary_tab_2$ci_beta_upper)
+
+OR_type = exp(coef(summary(none.disp))[2])
+OR_root = exp(coef(summary(none.disp))[3])
+
+summary_tab_2 %>% select(coefficients,OR,OR_L,OR_U) %>% knitr::kable(col.names = c("Coefficients", "OR", expression("95% CI of OR lower limits"),expression("95% CI of OR upper limits")),digits = 3)
+```
+
+The model means that hold species fixed, we expect to see a `r paste(round((OR_root-1)*100,2),"%")` increase in the odds (or `r round((OR_root),2)` times the odds) of germination in cucumber root extract media compared to the bean root extract media. On the other hand, if we fixed root extract media, then the odds of germination decrease by `r paste(abs(round((OR_type-1)*100,2)),"%")` (or `r round((OR_type),2)` times the odds) in OA75 species compared to OA73 species. The 95% confidence interval of root extract doesn't contain 1, we have 95% confidence to conclude that the type of root extract is significantly associated with success in germination. However, the 95% CI of species contains 1, we do not have enough confidence to say that the type of species is significantly associated with germination.
+
+
+(b) Is there over dispersion? If so, what is the estimate of dispersion parameter? Update your model and reinterpret the result.
+
+```{r estimate_phi}
+G.stat=sum(residuals(none.disp,type='pearson')^2) # pearson chisq 
+phi=G.stat/(none.disp$df.residual)
+
+```
+The true dispersion parameter is represented by $\phi$.From the estimation of dispersion parameter $\hat\phi = \frac{G_0}{n-p}$ = `r round(phi,3)`, where $G_0$ is the generalized Pearson $\chi^2$ from the original model fitting without over-dispersion. Since $\hat\phi>1$, that means there is an over-dispersion.
+
+```{r half_normal_plot,echo = FALSE}
+res=residuals(none.disp,type='pearson')
+plot(qnorm((21+1:21+0.5)/(2*21+1.125)),sort(abs(res)),xlab='Expected Half-Normal Order Stats',ylab='Ordered Abs Pearson Residuals')
+abline(a=0,b=1,col=1)
+abline(a=0,b=sqrt(phi),lty=2,col=2)
+```
+And from the Half Normal Plot we can see that the slope of ordered Pearson residuals line is greater than that of the reference line.
+
+```{r dispersion_model}
+summary(none.disp,dispersion=phi)
+```
+
+The interpretation of $\beta$ coefficients in the dispersion model doesn't change, but the standard error of $\beta's$ changed. As the standard error of $\beta's$ increased in the dispersion model, the confidence interval of OR became wider.
+
+(c) What is a plausible cause of the over dispersion?
+
+The over dispersion is caused by the true data not follows the binomial distribution exactly.
+There may be **intra-class correlations** between each group. In this situation, after a success in germination of a seed, the germinated seed may extract some chemicals that promote the germination of other seeds, and the germination
+rates of different seeds in different root extract medias may be different, that is **hierarchical sampling**.

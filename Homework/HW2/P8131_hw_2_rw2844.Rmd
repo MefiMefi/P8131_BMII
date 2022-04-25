@@ -1,0 +1,212 @@
+---
+title: "P8131_hw_2"
+author: "Renjie Wei rw2844"
+date: "2/18/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+#options(knitr.table.format = "latex")
+```
+
+## Problem 1
+Fit the model $g(\text{P}(\text{dying})) = \alpha +\beta X$, with logit, probit, and complementary log-log links.
+
+(a) Fill out the table and give comments.
+
+```{r problem_1_a, echo=FALSE}
+data1 <- data.frame(
+  dose = c(0,1,2,3,4),
+  nd = c(2,8,15,23,27),
+  na = 30-c(2,8,15,23,27)
+)
+
+logit.fit <- glm(cbind(nd,na) ~ dose, family = binomial(link = "logit"), data = data1)
+probit.fit <- glm(cbind(nd,na) ~ dose, family = binomial(link = "probit"), data = data1)
+cloglog.fit <- glm(cbind(nd,na) ~ dose, family = binomial(link = "cloglog"), data = data1)
+
+library(tidyverse)
+summary_tab_1 <- 
+  data.frame(
+    model = c("Logit", "Probit", "c-log-log"),
+    est_beta = c(logit.fit$coefficients[[2]],probit.fit$coefficients[[2]],cloglog.fit$coefficients[[2]]),
+    CI_beta_L = round(c(
+      logit.fit$coefficients[[2]]-(1.96*(summary(logit.fit)$coefficients[2,2])),
+      probit.fit$coefficients[[2]]-(1.96*(summary(probit.fit)$coefficients[2,2])),
+      cloglog.fit$coefficients[[2]]-(1.96*(summary(cloglog.fit)$coefficients[2,2]))
+    ),3),
+    CI_beta_U = round(c(
+      logit.fit$coefficients[[2]]+(1.96*(summary(logit.fit)$coefficients[2,2])),
+      probit.fit$coefficients[[2]]+(1.96*(summary(probit.fit)$coefficients[2,2])),
+      cloglog.fit$coefficients[[2]]+(1.96*(summary(cloglog.fit)$coefficients[2,2]))
+    ),3),
+    Deviance = c(
+      logit.fit$deviance,
+      probit.fit$deviance,
+      cloglog.fit$deviance
+    ),
+    p_ = c(
+      predict(logit.fit,newdata = data.frame(dose = 0.01), type = "response"),
+      predict(probit.fit,newdata = data.frame(dose = 0.01), type = "response"),
+      predict(cloglog.fit,newdata = data.frame(dose = 0.01), type = "response")
+    )
+    
+  )
+summary_tab_1$CI = c(
+      paste(summary_tab_1$CI_beta_L[1],summary_tab_1$CI_beta_U[1],sep = ","),
+      paste(summary_tab_1$CI_beta_L[2],summary_tab_1$CI_beta_U[2],sep = ","),
+      paste(summary_tab_1$CI_beta_L[3],summary_tab_1$CI_beta_U[3],sep = ",")
+    )
+
+summary_tab_1 %>%
+  select(model,est_beta,CI,Deviance,p_) %>% 
+  knitr::kable(col.names = c("Model", "Estimate of $\\beta$", expression("95% CI of $\\beta$"),"Deviance","p(dying|x=0.01)"), digits = 3)
+```
+
+Comments:
+
+- All the estimated $\beta$s are greater than 0, which means the increase in dose may increase the probability of dying. 
+- 0 is not included in all the 3 95% CIs, that means we have 95% confidence to conclude that the dose level is significantly associated with the probability of dying.
+- All the deviances follow the $\large{\chi^2}(3)$, the deviance of the
+probit link model is the smallest, which means it is the best fitted model among all the three models.
+- About the probability of dying conditioned on 0.01 dose, the logit link model gives us a 0.0901,the probit link model gives a 0.0853 and the c-log-log link model gives a 0.1282.
+
+
+(b) Suppose that the dose level is in natural logarithm scale, estimate LD50 with 90%
+confidence interval based on the three models.
+
+Since we got the following link functions:
+
+Logit link function:
+
+$$g_1(\pi) = log(\frac{\pi}{1-\pi}) = \beta_0+\beta_1x$$
+Probit link function:
+$$g_2(\pi) = \Phi^{-1}(\pi)= \beta_0+\beta_1x$$
+C-log-log link function:
+$$g_3(\pi) = \log(-\log(1-\pi))= \beta_0+\beta_1x$$
+So we can get the point estimates of $LD50$ by solving the following equation:
+
+$$g(0.5)=\beta_0+\beta_1x$$
+Logit estimate:
+$$\hat x = -\frac{\hat{\beta_0}}{\hat\beta_1} = f({\bf {\hat{\beta}}})$$
+Probit estimate:
+$$\hat x = \frac{\Phi^{-1}(0.5)-\hat{\beta_0}}{\hat\beta_1}= f({\bf {\hat{\beta}}})$$
+C-log-log estimate:
+$$\hat x = \frac{\log(-\log(0.5))-\hat{\beta_0}}{\hat\beta_1}= f({\bf {\hat{\beta}}})$$
+And we can get the asymptotic variance of $\hat x$:
+$$\text{var}(\hat x) = \text{var}(f({\bf {\hat{\beta}}})) = (\frac{\partial f({\bf{\hat{\beta}}})}{\partial \beta_0})^2\text{var}(\hat\beta_0)+(\frac{\partial f({\bf{\hat{\beta}}})}{\partial \beta_1})^2\text{var}(\hat\beta_1)+2(\frac{\partial f({\bf{\hat{\beta}}})}{\partial \beta_0})(\frac{\partial f({\bf{\hat{\beta}}})}{\partial \beta_1})\text{cov}(\hat\beta_0,\hat\beta_1)$$
+Then the asymptotic CI of $LD50$ is:
+$$LD50 \in [e^{\hat x-\text{z}_{\alpha/2}\sqrt{\text{var}(\hat x)}},e^{\hat x+\text{z}_{\alpha/2}\sqrt{\text{var}(\hat x)}}]$$
+I write a function to calculate the $\text{var}(\hat x)$, which is `se_of_h_beta`:
+
+```{r problem-1-b}
+# a function to calculate se for any h(beta)
+se_of_h_beta <- function(fit_object, h_expr){
+  beta_0 = fit_object$coefficients[["(Intercept)"]]
+  beta_1 = fit_object$coefficients[[2]]
+  h_beta = eval(h_expr)
+  
+  I_beta = vcov(fit_object)
+  #inv_I_beta = solve(I_beta) already inversed!
+  partial_d_beta0 = eval(D(h_expr,"beta_0"))
+  partial_d_beta1 = eval(D(h_expr,"beta_1"))
+  
+  partial_d_mtx = matrix(c(partial_d_beta0,partial_d_beta1),2,1)
+  se = sqrt(t(partial_d_mtx) %*% I_beta %*% partial_d_mtx)
+  return(c(h_beta,se))
+}
+
+LD50_logit = expression(-beta_0/beta_1)
+e_logit = se_of_h_beta(logit.fit, LD50_logit)
+
+
+LD50_probit = expression(-beta_0/beta_1)
+e_probit = se_of_h_beta(probit.fit, LD50_probit)
+
+g_pi_cloglog = log(-log(0.5))
+LD50_cloglog = expression((g_pi_cloglog-beta_0)/beta_1)
+e_cloglog = se_of_h_beta(cloglog.fit, LD50_cloglog)
+
+summary_tab_1_b <- 
+  data.frame(
+    Model = c("Logit", "Probit", "c-log-log"),
+    LD50 = c(exp(e_logit[1]), exp(e_probit[1]), exp(e_cloglog[1])),
+    CI_L = exp(c(e_logit[1], e_probit[1], e_cloglog[1]) - qnorm(.95)*c(e_logit[2], e_probit[2], e_cloglog[2])),
+    CI_U = exp(c(e_logit[1], e_probit[1], e_cloglog[1]) + qnorm(.95)*c(e_logit[2], e_probit[2], e_cloglog[2]))
+  )
+
+
+```
+
+The following table shows the results of estimated LD50.  
+```{r summary_LD50, echo=FALSE}
+summary_tab_1_b %>% 
+  knitr::kable(col.names = c("Model","Estimate of LD50","90% CI lower", "90% CI upper"),digit=3)
+```
+
+
+
+## Problem 2
+Please analyze the data using a logistic regression and answer the following questions.
+
+(a) How does the model fit the data?
+
+Firstly, I made a dataframe for the data.
+```{r problem-2-a-1, echo=FALSE}
+mph_enroll <- 
+  data.frame(
+    amount = seq(10, 90, by = 5),
+    offers = c(4, 6, 10, 12, 39, 36, 22, 14, 10, 12, 8, 9, 3, 1, 5, 2, 1),
+    enrolls = c(0, 2, 4, 2, 12, 14, 10, 7, 5, 5, 3, 5, 2, 0, 4, 2, 1)
+  )
+```
+
+We assume the response of those who received offers $Y_i$ in each group follow the same Bernoulli distribution $Y_i \sim Bin(1,\pi)$, then in each group $j$ with size $m_j$, $Y = \sum\limits_{i=1}^{m_j}Y_i$ has a Binomial distribution, that is $Y\sim Bin(m_j,\pi)$.
+
+So we fit a logistic regression based on the above assumptions.
+```{r mph_fit}
+mph.fit <-
+  glm(cbind(enrolls, offers-enrolls) ~ amount, family = binomial(link = "logit"), data = mph_enroll)
+```
+
+And I do Hosmer–Lemeshow test for the goodness-of-fit since the data is sparse.
+```{r hoslem_test}
+library(ResourceSelection)
+hoslem.test(mph.fit$y, fitted(mph.fit), g=10)
+```
+The result shows that the Hosmer-Lemeshow stastic $\chi^2_{HL}$ is `X-squared = 1.6111` with `df = 8` and `p-value = 0.9907`. Since `p-value` is greater than 0.05, we fail to reject the null hypothesis and conclude that there is no evidence of that the model is lack of fit.
+
+
+(b) How do you interpret the relationship between the scholarship amount and enrollment
+rate? What is 95% CI?
+
+```{r summary_mph_fit, echo=FALSE}
+summary(mph.fit)
+e_beta = mph.fit$coefficients[[2]]
+OR = exp(e_beta)
+se_beta = summary(mph.fit)$coefficients["amount","Std. Error"]
+beta_CI_L = e_beta - qnorm(.975)*se_beta
+beta_CI_U = e_beta + qnorm(.975)*se_beta
+OR_CI_L = exp(beta_CI_L)
+OR_CI_U = exp(beta_CI_U)
+```
+
+The estimate coefficient $\beta_1$ is `r round(e_beta,3)`, which is equal to the $\log(OR_{\text{amout}})$. So the $OR_{\text{amout}}$ is `r round(exp(e_beta),3)`, which means the odds ratio of enrollment increases 3.14% per 1000 dollars increase in the scholarship. The 95% CI of OR is (`round(OR_CI_L,3)`,`round(OR_CI_U,3)`)
+
+
+(c) How much scholarship should we provide to get 40% yield rate (the percentage of
+admitted students who enroll?) What is the 95% CI?
+
+Since we use logit link function, we can get the estimate of scholarship (to get 40% yield rate) by solving the following equation:
+$$\log(\frac{\pi}{1-\pi}) = \log(0.4/0.6) = \hat\beta_0+\hat\beta_1\times\widehat{\text{scholarship}}$$
+Then we can get the estimate scholarship and the asymptotic variance and CI with the same method in problem 1.
+  
+```{r mph_estimate, echo=FALSE}
+mph_expr = expression((log(2/3)-beta_0)/beta_1)
+e_mph = se_of_h_beta(mph.fit, mph_expr)
+e_mph_CI_L = e_mph[1] - qnorm(.975)*e_mph[2]
+e_mph_CI_U = e_mph[1] + qnorm(.975)*e_mph[2]
+```
+
+We get the estimate of scholarship $\widehat {\text{scholarship}}$ = `r round(e_mph[1],3)`, which means we should provide `r round(e_mph[1],3)` thousand dollars of scholarship to get 40% yield rate. The 95% CI is (`r round(e_mph_CI_L,3)`,`r round(e_mph_CI_U,3)`)
